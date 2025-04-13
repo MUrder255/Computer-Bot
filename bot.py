@@ -1,14 +1,14 @@
-from openai import OpenAI
+import openai
 
 # OpenAI API Key
 OPENAI_API_KEY = "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"
-client = OpenAI(api_key=OPENAI_API_KEY)
+openai.api_key = OPENAI_API_KEY
 
 # Function to generate code or feature ideas using OpenAI
 def generate_code(prompt):
     try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # Recommended model
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",  # Use a chat-based model
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}
