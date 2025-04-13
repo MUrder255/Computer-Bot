@@ -1,7 +1,9 @@
+import os
+import subprocess  # <-- Make sure this is included
 from openai import OpenAI
 
 # Initialize OpenAI client with your API key
-client = OpenAI(api_key="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")
+client = OpenAI(api_key="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")  # Replace with your actual API key
 
 # Function to generate code or feature ideas using OpenAI
 def generate_code(prompt):
