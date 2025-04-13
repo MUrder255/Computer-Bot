@@ -4,9 +4,11 @@ import logging
 import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from openai import OpenAI
-import speech_recognition as sr
 import pyttsx3
-import json
+import speech_recognition as sr
+import threading
+import vlc  # VLC for music playback
+from concurrent.futures import ThreadPoolExecutor
 
 # Initialize OpenAI client with your API key
 client = OpenAI(api_key="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")  # Replace with your actual API key
@@ -18,150 +20,146 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-# Initialize the scheduler
+# Initialize scheduler and text-to-speech engine
 scheduler = BackgroundScheduler()
 scheduler.start()
-
-# Initialize text-to-speech
 engine = pyttsx3.init()
 
-# Load user profiles
-USER_PROFILES = {}
-PROFILE_FILE = "user_profiles.json"
-if os.path.exists(PROFILE_FILE):
-    with open(PROFILE_FILE, "r") as file:
-        USER_PROFILES = json.load(file)
+# Global VLC player instance
+player = None
 
-# Function to save profiles
-def save_profiles():
-    with open(PROFILE_FILE, "w") as file:
-        json.dump(USER_PROFILES, file, indent=4)
+# Maximum number of bots in the pool
+MAX_BOTS = 5
 
-# Function to generate code or feature ideas using OpenAI
-def generate_code(prompt):
+# Function to play music from SoundCloud
+def play_music(track_url):
+    global player
     try:
+        if player is None:
+            player = vlc.MediaPlayer(track_url)
+        else:
+            player.set_media(vlc.Media(track_url))
+        player.play()
+        logging.info(f"Playing music from: {track_url}")
+        print(f"Playing music from: {track_url}")
+    except Exception as e:
+        logging.error(f"Error playing music: {e}")
+        print(f"Error playing music: {e}")
+
+# Function to stop music playback
+def stop_music():
+    global player
+    if player is not None:
+        player.stop()
+        logging.info("Music playback stopped.")
+        print("Music playback stopped.")
+
+# Function to analyze code and suggest fixes or upgrades
+def analyze_code(directory):
+    try:
+        code = ""
+        for root, _, files in os.walk(directory):
+            for file in files:
+                if file.endswith((".py", ".js", ".java", ".cpp")):  # Adjust for your app's languages
+                    file_path = os.path.join(root, file)
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        code += f"\n# File: " + file + "\n" + f.read()
+
+        prompt = f"""
+        You are a code assistant. Analyze the following code and suggest improvements, fixes, and upgrades:
+        {code}
+        """
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": "You are a helpful assistant for analyzing and improving code."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=500,
+            max_tokens=1000,
             temperature=0.7
         )
-        return response.choices[0].message.content.strip()
+        suggestions = response.choices[0].message.content.strip()
+        logging.info("Code Analysis Suggestions:\n" + suggestions)
+        print("Code Analysis Suggestions:\n", suggestions)
     except Exception as e:
-        logging.error(f"Error generating code: {e}")
-        return None
+        logging.error(f"Error analyzing code: {e}")
+        print(f"Error analyzing code: {e}")
 
-# Function to execute system commands
-def execute_task(task):
+# Function to fix code issues
+def fix_code(file_path):
     try:
-        if "open" in task.lower():
-            path = task.split("open")[-1].strip()
-            if os.path.exists(path):
-                os.startfile(path)
-                logging.info(f"Opened: {path}")
-                print(f"Opened: {path}")
-            else:
-                logging.warning(f"Path not found: {path}")
-                print(f"Path not found: {path}")
-        elif "install" in task.lower():
-            package = task.split("install")[-1].strip()
-            subprocess.run(["pip", "install", package], check=True)
-            logging.info(f"Installed package: {package}")
-            print(f"Installed package: {package}")
-        elif "update" in task.lower():
-            print("Running system update...")
-            subprocess.run(["sudo", "apt", "update"], check=True)  # For Linux
-            logging.info("System update completed.")
-        else:
-            subprocess.run(task, shell=True, check=True)
-            logging.info(f"Executed command: {task}")
-            print(f"Executed command: {task}")
+        with open(file_path, "r", encoding="utf-8") as f:
+            code = f.read()
+
+        prompt = f"""
+        You are a code assistant. Here is some code with issues. Fix the code and ensure it works properly:
+        {code}
+        """
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant for fixing and improving code."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000,
+            temperature=0.7
+        )
+        fixed_code = response.choices[0].message.content.strip()
+        logging.info(f"Fixed Code for {file_path}:\n" + fixed_code)
+        print(f"Fixed Code for {file_path}:\n", fixed_code)
+
+        # Save the fixed code back to the file
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(fixed_code)
+        print(f"Fixed code saved to {file_path}")
     except Exception as e:
-        logging.error(f"Error executing task: {e}")
-        print(f"Error executing task: {e}")
+        logging.error(f"Error fixing code in {file_path}: {e}")
+        print(f"Error fixing code in {file_path}: {e}")
 
-# Function to schedule tasks
-def schedule_task(task, run_time):
-    try:
-        run_time = datetime.datetime.strptime(run_time, "%Y-%m-%d %H:%M:%S")
-        scheduler.add_job(lambda: execute_task(task), 'date', run_date=run_time)
-        logging.info(f"Scheduled task: '{task}' at {run_time}")
-        print(f"Task scheduled: '{task}' at {run_time}")
-    except Exception as e:
-        logging.error(f"Error scheduling task: {e}")
-        print(f"Error scheduling task: {e}")
+# Bot Pool Manager to distribute tasks
+def bot_pool_manager(task, directory):
+    # Create a thread pool to manage bots
+    with ThreadPoolExecutor(max_workers=MAX_BOTS) as executor:
+        tasks = []
+        for root, _, files in os.walk(directory):
+            for file in files:
+                if file.endswith((".py", ".js", ".java", ".cpp")):  # Adjust for your app's languages
+                    file_path = os.path.join(root, file)
+                    if task == "fix":
+                        tasks.append(executor.submit(fix_code, file_path))
+                    elif task == "analyze":
+                        tasks.append(executor.submit(analyze_code, directory))
 
-# Function to suggest features
-def suggest_features():
-    prompt = "Suggest innovative features for a modern automation bot that can manage apps, upgrade them, and implement new ideas."
-    features = generate_code(prompt)
-    if features:
-        logging.info("Generated feature suggestions.")
-        print("Suggested Features:\n", features)
-    else:
-        logging.error("Failed to generate feature suggestions.")
-        print("Failed to generate feature suggestions.")
-
-# Voice command recognition
-def recognize_voice():
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        print("Listening for your command...")
-        try:
-            audio = recognizer.listen(source)
-            command = recognizer.recognize_google(audio)
-            return command
-        except sr.UnknownValueError:
-            print("Sorry, I didn't catch that.")
-        except sr.RequestError as e:
-            print(f"Error with speech recognition service: {e}")
-    return None
-
-# Function to interact with the user via voice
-def voice_assistant():
-    command = recognize_voice()
-    if command:
-        print(f"You said: {command}")
-        execute_task(command)
-
-# Function to display user profiles
-def display_profiles():
-    if USER_PROFILES:
-        print("\n--- User Profiles ---")
-        for user, data in USER_PROFILES.items():
-            print(f"User: {user}")
-            print(f"Preferences: {data}")
-    else:
-        print("No user profiles found.")
+        # Wait for all tasks to complete
+        for future in tasks:
+            future.result()
 
 # Main menu for the bot
 def main():
     while True:
-        print("\n--- Advanced Computer Bot Menu ---")
-        print("1. Suggest Features")
-        print("2. Execute Task")
-        print("3. Schedule Task")
-        print("4. Voice Assistant")
-        print("5. Display User Profiles")
+        print("\n--- App Development Assistant Menu ---")
+        print("1. Analyze Code (Single Bot)")
+        print("2. Analyze Code (Multiple Bots)")
+        print("3. Fix Code (Multiple Bots)")
+        print("4. Play Music")
+        print("5. Stop Music")
         print("6. Exit")
         choice = input("Enter your choice: ")
 
         if choice == "1":
-            suggest_features()
+            directory = input("Enter the directory of your app: ")
+            analyze_code(directory)
         elif choice == "2":
-            task = input("What task should I perform? (e.g., 'open Notepad', 'install numpy', 'update system'): ")
-            execute_task(task)
+            directory = input("Enter the directory of your app: ")
+            bot_pool_manager("analyze", directory)
         elif choice == "3":
-            task = input("What task should I schedule? (e.g., 'open Notepad', 'install numpy'): ")
-            run_time = input("When should the task run? (format: YYYY-MM-DD HH:MM:SS): ")
-            schedule_task(task, run_time)
+            directory = input("Enter the directory of your app: ")
+            bot_pool_manager("fix", directory)
         elif choice == "4":
-            voice_assistant()
+            track_url = input("Enter the SoundCloud track URL: ")
+            threading.Thread(target=play_music, args=(track_url,)).start()
         elif choice == "5":
-            display_profiles()
+            stop_music()
         elif choice == "6":
             print("Exiting...")
             break
@@ -174,4 +172,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nExiting gracefully...")
         scheduler.shutdown()
-        save_profiles()
