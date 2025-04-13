@@ -1,7 +1,7 @@
 from openai import OpenAI
 
 # Initialize OpenAI client with your API key
-client = OpenAI(api_key="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")
+client = OpenAI(api_key="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")
 
 # Function to generate code or feature ideas using OpenAI
 def generate_code(prompt):
