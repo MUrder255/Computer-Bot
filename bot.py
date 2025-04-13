@@ -6,18 +6,28 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Function to generate code or feature ideas using OpenAI
 def generate_code(prompt):
-    response = client.completions.create(
-        model="text-davinci-003",
-        prompt=prompt,
-        max_tokens=500
-    )
-    return response.choices[0].text.strip()
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",  # Recommended model
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=500
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"Error generating code: {e}")
+        return None
 
 # Function to suggest features
 def suggest_features():
     prompt = "Suggest innovative features for a modern automation bot that can manage apps, upgrade them, and implement new ideas."
     features = generate_code(prompt)
-    print("Suggested Features:\n", features)
+    if features:
+        print("Suggested Features:\n", features)
+    else:
+        print("Failed to generate feature suggestions.")
 
 # Main menu for the bot
 def main():
